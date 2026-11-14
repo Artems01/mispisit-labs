@@ -38,15 +38,42 @@
             border-radius: 999px;
             font-weight: 700;
         }
-        .status { margin: 0; color: #68758b; font-size: 15px; }
+        .status { margin: 0 0 30px; color: #68758b; font-size: 15px; }
+        .nav-links {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 20px;
+            background: #0d9488;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+        .btn:hover { background: #0f766e; }
+        .btn-secondary {
+            background: #475569;
+        }
+        .btn-secondary:hover { background: #334155; }
     </style>
 </head>
 <body>
     <main>
         <h1>WordMaster</h1>
         <p class="description">Помощник по изучению иностранных слов: создавайте личный словарь, повторяйте слова и проверяйте свои знания.</p>
-        <div class="version">Версия 0.0.1</div>
-        <p class="status">Разработка продолжается</p>
+        <div class="version">Версия 0.0.2</div>
+        <p class="status">Каркас приложения и главные функции реализованы</p>
+        
+        <div class="nav-links">
+            <a href="/words" class="btn">Лента слов</a>
+            <a href="/words/new" class="btn">Добавить слово</a>
+            <a href="/action-error" class="btn btn-secondary">Пример отказа</a>
+        </div>
     </main>
 </body>
 </html>

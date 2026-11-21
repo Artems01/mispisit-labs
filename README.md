@@ -1,25 +1,8 @@
 # WordMaster — помощник по изучению иностранных слов
 
-Первая страница проекта WordMaster для лабораторной работы №1.
+Миграция проекта WordMaster на PostgreSQL и контейнеризация через Docker Compose для лабораторной работы №3 (версия `0.0.3`).
 
-## Локальный запуск
-
-```bash
-npm install
-npm start
-```
-
-Откройте в браузере: http://localhost:8080
-
-## Сборка и запуск Docker
+## Запуск через Docker Compose
 
 ```bash
-docker build -t wordmaster:0.0.1 .
-docker run --rm -p 8080:8080 wordmaster:0.0.1
-```
-
-Откройте в браузере: http://localhost:8080
-
-## Проверка состояния
-
-Откройте http://localhost:8080/health
+docker compose up -d

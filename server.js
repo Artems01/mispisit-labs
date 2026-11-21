@@ -1,30 +1,44 @@
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
+const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-const DATA_FILE = path.join(__dirname, 'data', 'words.json');
 
-// Middleware для чтения данных из форм и статики
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL || 'postgres://app:app@db:5432/app'
+});
+
 app.use(express.urlencoded({ extended: true }));
-app.use(express.express?.static ? express.static(path.join(__dirname, 'public')) : express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Функция чтения слов из JSON
-function getWords() {
-    if (!fs.existsSync(DATA_FILE)) {
-        const initial = [{
-            id: 1,
-            word: "Resilience",
-            translation: "Устойчивость",
-            example: "System resilience is critical.",
-            date: "04.11.2026 - 12:58"
-        }];
-        fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
-        fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2));
+function formatCurrentDate() {
+    const now = new Date();
+    return `${now.toLocaleDateString('ru-RU')} - ${now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+async function initDatabase(retries = 15, delayMs = 2000) {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS words (
+                    id SERIAL PRIMARY KEY,
+                    word VARCHAR(255) NOT NULL,
+                    translation VARCHAR(255) NOT NULL,
+                    example TEXT NOT NULL DEFAULT '',
+                    created_at VARCHAR(64) NOT NULL
+                );
+            `);
+            console.log('Database connected and schema is ready.');
+            return;
+        } catch (err) {
+            console.log(`Waiting for PostgreSQL (attempt ${attempt}/${retries}): ${err.message}`);
+            if (attempt === retries) {
+                throw err;
+            }
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
     }
-    const data = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(data);
 }
 
 // 1. Главная страница (/)
@@ -47,7 +61,7 @@ app.get('/', (req, res) => {
             <div class="card">
                 <h1>WordMaster</h1>
                 <p>Помощник по изучению иностранных слов: создавайте личный словарь, повторяйте слова и проверяйте свои знания.</p>
-                <p><strong>Версия 0.0.2</strong></p>
+                <p><strong>Версия 0.0.3</strong></p>
                 <div style="margin-top: 30px;">
                     <a href="/words" class="btn">Лента слов</a>
                     <a href="/words/new" class="btn">Добавить слово</a>
@@ -60,31 +74,42 @@ app.get('/', (req, res) => {
 });
 
 // 2. Просмотр списка слов (/words)
-app.get('/words', (req, res) => {
-    const words = getWords();
-    const cards = words.map(w => `
-        <div style="background:white; padding:20px; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05); text-align:left;">
-            <h3>${w.word} — ${w.translation}</h3>
-            <p>Пример: ${w.example}</p>
-            <small>Добавлено: ${w.date}</small>
-            <br><a href="/words/${w.id}" style="color:#0d9488; font-weight:bold; text-decoration:none;">Открыть карточку &rarr;</a>
-        </div>
-    `).join('');
+app.get('/words', async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT id, word, translation, example, created_at FROM words ORDER BY id ASC'
+        );
+        const words = result.rows;
 
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8"><title>WordMaster - Лента слов</title>
-            <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 800px; margin: 0 auto; }</style>
-        </head>
-        <body>
-            <nav style="margin-bottom: 20px;"><a href="/">&larr; На главную</a> | <a href="/words/new">+ Добавить слово</a></nav>
-            <h1>Лента слов (${words.length})</h1>
-            ${cards}
-        </body>
-        </html>
-    `);
+        const cards = words.length > 0
+            ? words.map((w) => `
+                <div style="background:white; padding:20px; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05); text-align:left;">
+                    <h3>${w.word} — ${w.translation}</h3>
+                    <p>Пример: ${w.example}</p>
+                    <small>Добавлено: ${w.created_at}</small>
+                    <br><a href="/words/${w.id}" style="color:#0d9488; font-weight:bold; text-decoration:none;">Открыть карточку &rarr;</a>
+                </div>
+            `).join('')
+            : '<p style="background:white; padding:20px; border-radius:8px; color:#475569;">Список слов пока пуст. Добавьте первую запись через форму.</p>';
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="ru">
+            <head>
+                <meta charset="UTF-8"><title>WordMaster - Лента слов</title>
+                <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 800px; margin: 0 auto; }</style>
+            </head>
+            <body>
+                <nav style="margin-bottom: 20px;"><a href="/">&larr; На главную</a> | <a href="/words/new">+ Добавить слово</a></nav>
+                <h1>Лента слов (${words.length})</h1>
+                ${cards}
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        console.error('Error loading words:', err);
+        res.redirect('/action-error?reason=db_error');
+    }
 });
 
 // 3. Форма добавления слова (/words/new)
@@ -119,64 +144,86 @@ app.get('/words/new', (req, res) => {
     `);
 });
 
-// Обработка отправки формы (создание данных с проверкой ошибок)
-app.post('/words', (req, res) => {
+// Обработка отправки формы (создание записи в PostgreSQL)
+app.post('/words', async (req, res) => {
     const { word, translation, example } = req.body;
-    
-    // Ошибочный сценарий: если поля пустые
+
     if (!word || !translation || word.trim() === '' || translation.trim() === '') {
         return res.redirect('/action-error?reason=empty_fields');
     }
 
-    const words = getWords();
-    const newEntry = {
-        id: words.length > 0 ? words[words.length - 1].id + 1 : 1,
-        word: word.trim(),
-        translation: translation.trim(),
-        example: example ? example.trim() : '',
-        date: new Date().toLocaleDateString('ru-RU') + ' - ' + new Date().toLocaleTimeString('ru-RU', {hour: '2-digit', minute:'2-digit'})
-    };
+    try {
+        const cleanWord = word.trim();
+        const cleanTranslation = translation.trim();
+        const cleanExample = example ? example.trim() : '';
+        const createdAt = formatCurrentDate();
 
-    words.push(newEntry);
-    fs.writeFileSync(DATA_FILE, JSON.stringify(words, null, 2));
-    res.redirect(`/words/${newEntry.id}`);
+        const insertResult = await pool.query(
+            `INSERT INTO words (word, translation, example, created_at)
+             VALUES ($1, $2, $3, $4)
+             RETURNING id`,
+            [cleanWord, cleanTranslation, cleanExample, createdAt]
+        );
+
+        const newId = insertResult.rows[0].id;
+        res.redirect(`/words/${newId}`);
+    } catch (err) {
+        console.error('Error inserting word:', err);
+        res.redirect('/action-error?reason=db_error');
+    }
 });
 
 // 4. Карточка отдельного слова (/words/:id)
-app.get('/words/:id', (req, res) => {
-    const words = getWords();
-    const word = words.find(w => w.id == req.params.id);
-
-    if (!word) {
+app.get('/words/:id', async (req, res) => {
+    const wordId = Number(req.params.id);
+    if (!Number.isInteger(wordId) || wordId <= 0) {
         return res.redirect('/action-error?reason=not_found');
     }
 
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8"><title>WordMaster - Карточка слова</title>
-            <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 600px; margin: 0 auto; }</style>
-        </head>
-        <body>
-            <nav style="margin-bottom: 20px;"><a href="/words">&larr; К ленте слов</a> | <a href="/">На главную</a></nav>
-            <div style="background:white; padding:30px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                <span style="background:#ccfbf1; color:#0f766e; padding:4px 8px; border-radius:4px; font-size:12px;">Слово №${word.id}</span>
-                <h1 style="margin-top:10px;">${word.word}</h1>
-                <h2>Перевод: ${word.translation}</h2>
-                <p><strong>Пример:</strong> ${word.example || 'Нет примера'}</p>
-                <small>Добавлено: ${word.date}</small>
-            </div>
-        </body>
-        </html>
-    `);
+    try {
+        const result = await pool.query(
+            'SELECT id, word, translation, example, created_at FROM words WHERE id = $1',
+            [wordId]
+        );
+        const word = result.rows[0];
+
+        if (!word) {
+            return res.redirect('/action-error?reason=not_found');
+        }
+
+        res.send(`
+            <!DOCTYPE html>
+            <html lang="ru">
+            <head>
+                <meta charset="UTF-8"><title>WordMaster - Карточка слова</title>
+                <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 600px; margin: 0 auto; }</style>
+            </head>
+            <body>
+                <nav style="margin-bottom: 20px;"><a href="/words">&larr; К ленте слов</a> | <a href="/">На главную</a></nav>
+                <div style="background:white; padding:30px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+                    <span style="background:#ccfbf1; color:#0f766e; padding:4px 8px; border-radius:4px; font-size:12px;">Слово №${word.id}</span>
+                    <h1 style="margin-top:10px;">${word.word}</h1>
+                    <h2>Перевод: ${word.translation}</h2>
+                    <p><strong>Пример:</strong> ${word.example || 'Нет примера'}</p>
+                    <small>Добавлено: ${word.created_at}</small>
+                </div>
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        console.error('Error fetching word detail:', err);
+        res.redirect('/action-error?reason=db_error');
+    }
 });
 
 // 5. Страница отказа / ошибочный сценарий (/action-error)
 app.get('/action-error', (req, res) => {
-    const reason = req.query.reason === 'not_found' 
-        ? 'Запрашиваемое слово не найдено в базе данных.' 
-        : 'Обязательные поля (слово и перевод) не могут быть пустыми.';
+    let reason = 'Обязательные поля (слово и перевод) не могут быть пустыми.';
+    if (req.query.reason === 'not_found') {
+        reason = 'Запрашиваемое слово не найдено в базе данных.';
+    } else if (req.query.reason === 'db_error') {
+        reason = 'Ошибка при обращении к базе данных.';
+    }
 
     res.send(`
         <!DOCTYPE html>
@@ -204,6 +251,13 @@ app.get('/action-error', (req, res) => {
     `);
 });
 
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
-});
+initDatabase()
+    .then(() => {
+        app.listen(PORT, () => {
+            console.log(`Server is running on http://localhost:${PORT}`);
+        });
+    })
+    .catch((err) => {
+        console.error('Failed to initialize database:', err);
+        process.exit(1);
+    });

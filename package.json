@@ -1,6 +1,6 @@
 {
   "name": "wordmaster",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "private": true,
   "description": "WordMaster - помощник по изучению иностранных слов",
   "main": "server.js",
@@ -8,6 +8,7 @@
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "5.1.0"
+    "express": "5.1.0",
+    "pg": "8.13.1"
   }
 }

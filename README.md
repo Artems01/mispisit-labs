@@ -1,25 +1,14 @@
 # WordMaster — помощник по изучению иностранных слов
 
-Первая страница проекта WordMaster для лабораторной работы №1.
+Оформление интерфейса рабочей версии `0.0.4` (единые стили, навигация между экранами, сохранение данных в PostgreSQL).
 
-## Локальный запуск
+## Запуск
 
-```bash
-npm install
-npm start
-```
+Репозиторий: https://github.com/Artems01/mispisit-labs
+Ветка: lab4
+Pull Request: https://github.com/Artems01/mispisit-labs/pull/4
+Образ: artems01/wordmaster:0.0.4
 
-Откройте в браузере: http://localhost:8080
-
-## Сборка и запуск Docker
-
-```bash
-docker build -t wordmaster:0.0.1 .
-docker run --rm -p 8080:8080 wordmaster:0.0.1
-```
-
-Откройте в браузере: http://localhost:8080
-
-## Проверка состояния
-
-Откройте http://localhost:8080/health
+git clone -b lab4 https://github.com/Artems01/mispisit-labs
+cd mispisit-labs
+docker compose up -d

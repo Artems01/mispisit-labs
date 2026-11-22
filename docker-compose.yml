@@ -2,7 +2,7 @@ name: mispisit-semin
 
 services:
   app:
-    image: artems01/wordmaster:0.0.3
+    image: artems01/wordmaster:0.0.4
     ports:
       - "8080:8080"
     environment:

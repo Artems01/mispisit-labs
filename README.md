@@ -1,8 +1,14 @@
 # WordMaster — помощник по изучению иностранных слов
 
-Миграция проекта WordMaster на PostgreSQL и контейнеризация через Docker Compose для лабораторной работы №3 (версия `0.0.3`).
+Оформление интерфейса рабочей версии `0.0.4` (единые стили, навигация между экранами, сохранение данных в PostgreSQL).
 
-## Запуск через Docker Compose
+## Запуск
 
-```bash
+Репозиторий: https://github.com/Artems01/mispisit-labs
+Ветка: lab4
+Pull Request: https://github.com/Artems01/mispisit-labs/pull/4
+Образ: artems01/wordmaster:0.0.4
+
+git clone -b lab4 https://github.com/Artems01/mispisit-labs
+cd mispisit-labs
 docker compose up -d

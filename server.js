@@ -4,6 +4,7 @@ const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+const APP_VERSION = '0.0.4';
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgres://app:app@db:5432/app'
@@ -12,9 +13,59 @@ const pool = new Pool({
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function formatCurrentDate() {
     const now = new Date();
     return `${now.toLocaleDateString('ru-RU')} - ${now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function renderLayout({ title, activeNav, content }) {
+    const navClass = (key) => (activeNav === key ? ' class="active"' : '');
+
+    return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>${escapeHtml(title)} — WordMaster (v${APP_VERSION})</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a href="/" class="brand">
+                <span>WordMaster</span>
+                <span class="version-badge">v${APP_VERSION}</span>
+            </a>
+            <nav class="nav" aria-label="Основная навигация">
+                <a href="/"${navClass('home')}>Главная</a>
+                <a href="/words"${navClass('words')}>Лента слов</a>
+                <a href="/words/new"${navClass('new')}>Добавить слово</a>
+                <a href="/action-error"${navClass('error')}>Пример отказа</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="container">
+        ${content}
+    </main>
+
+    <footer class="footer">
+        <div class="footer-inner">
+            <span>WordMaster — учебный словарь</span>
+            <span>Версия ${APP_VERSION}</span>
+        </div>
+    </footer>
+</body>
+</html>`;
 }
 
 async function initDatabase(retries = 15, delayMs = 2000) {
@@ -43,34 +94,23 @@ async function initDatabase(retries = 15, delayMs = 2000) {
 
 // 1. Главная страница (/)
 app.get('/', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8">
-            <title>WordMaster - Главная</title>
-            <style>
-                body { font-family: Arial, sans-serif; background: #f8fafc; color: #1e293b; padding: 40px; text-align: center; }
-                .card { background: white; max-width: 600px; margin: 0 auto; padding: 40px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-                h1 { color: #0f172a; }
-                .btn { display: inline-block; margin: 10px; padding: 12px 24px; background: #0d9488; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
-                .btn-secondary { background: #475569; }
-            </style>
-        </head>
-        <body>
-            <div class="card">
+    const html = renderLayout({
+        title: 'Главная',
+        activeNav: 'home',
+        content: `
+            <section class="panel hero">
+                <span class="version-badge">Версия ${APP_VERSION}</span>
                 <h1>WordMaster</h1>
-                <p>Помощник по изучению иностранных слов: создавайте личный словарь, повторяйте слова и проверяйте свои знания.</p>
-                <p><strong>Версия 0.0.3</strong></p>
-                <div style="margin-top: 30px;">
-                    <a href="/words" class="btn">Лента слов</a>
-                    <a href="/words/new" class="btn">Добавить слово</a>
-                    <a href="/action-error" class="btn btn-secondary">Пример отказа</a>
+                <p>Личный словарь для изучения иностранных слов: сохраняйте новые слова, просматривайте список и карточки в базе данных.</p>
+                <div class="actions">
+                    <a href="/words" class="btn btn-primary">Лента слов</a>
+                    <a href="/words/new" class="btn btn-secondary">Добавить слово</a>
+                    <a href="/action-error" class="btn btn-secondary">Страница отказа</a>
                 </div>
-            </div>
-        </body>
-        </html>
-    `);
+            </section>
+        `
+    });
+    res.send(html);
 });
 
 // 2. Просмотр списка слов (/words)
@@ -81,31 +121,37 @@ app.get('/words', async (req, res) => {
         );
         const words = result.rows;
 
-        const cards = words.length > 0
+        const listMarkup = words.length > 0
             ? words.map((w) => `
-                <div style="background:white; padding:20px; margin-bottom:15px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05); text-align:left;">
-                    <h3>${w.word} — ${w.translation}</h3>
-                    <p>Пример: ${w.example}</p>
-                    <small>Добавлено: ${w.created_at}</small>
-                    <br><a href="/words/${w.id}" style="color:#0d9488; font-weight:bold; text-decoration:none;">Открыть карточку &rarr;</a>
-                </div>
+                <article class="word-card">
+                    <h2>${escapeHtml(w.word)} — ${escapeHtml(w.translation)}</h2>
+                    <p class="word-example">${escapeHtml(w.example || 'Пример не указан')}</p>
+                    <div class="word-meta">
+                        <span>Добавлено: ${escapeHtml(w.created_at)}</span>
+                        <a href="/words/${w.id}" class="btn btn-secondary">Открыть карточку &rarr;</a>
+                    </div>
+                </article>
             `).join('')
-            : '<p style="background:white; padding:20px; border-radius:8px; color:#475569;">Список слов пока пуст. Добавьте первую запись через форму.</p>';
+            : `
+                <section class="empty-state">
+                    <h2>Слов пока нет</h2>
+                    <p>В словаре ещё нет записей. Добавьте первое слово, чтобы оно появилось в списке и сохранилось в базе.</p>
+                    <a href="/words/new" class="btn btn-primary">+ Добавить первое слово</a>
+                </section>
+            `;
 
-        res.send(`
-            <!DOCTYPE html>
-            <html lang="ru">
-            <head>
-                <meta charset="UTF-8"><title>WordMaster - Лента слов</title>
-                <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 800px; margin: 0 auto; }</style>
-            </head>
-            <body>
-                <nav style="margin-bottom: 20px;"><a href="/">&larr; На главную</a> | <a href="/words/new">+ Добавить слово</a></nav>
-                <h1>Лента слов (${words.length})</h1>
-                ${cards}
-            </body>
-            </html>
-        `);
+        const html = renderLayout({
+            title: 'Лента слов',
+            activeNav: 'words',
+            content: `
+                <div class="page-header">
+                    <h1>Лента слов (${words.length})</h1>
+                    <a href="/words/new" class="btn btn-primary">+ Добавить слово</a>
+                </div>
+                ${listMarkup}
+            `
+        });
+        res.send(html);
     } catch (err) {
         console.error('Error loading words:', err);
         res.redirect('/action-error?reason=db_error');
@@ -114,34 +160,37 @@ app.get('/words', async (req, res) => {
 
 // 3. Форма добавления слова (/words/new)
 app.get('/words/new', (req, res) => {
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8"><title>WordMaster - Добавить слово</title>
-            <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 500px; margin: 0 auto; }</style>
-        </head>
-        <body>
-            <nav style="margin-bottom: 20px;"><a href="/">&larr; На главную</a> | <a href="/words">К ленте</a></nav>
-            <h1>Добавить новое слово</h1>
-            <form action="/words" method="POST" style="background:white; padding:25px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                <div style="margin-bottom:15px;">
-                    <label>Иностранное слово:</label><br>
-                    <input type="text" name="word" style="width:100%; padding:8px; margin-top:5px; box-sizing:border-box;">
-                </div>
-                <div style="margin-bottom:15px;">
-                    <label>Перевод:</label><br>
-                    <input type="text" name="translation" style="width:100%; padding:8px; margin-top:5px; box-sizing:border-box;">
-                </div>
-                <div style="margin-bottom:15px;">
-                    <label>Пример использования:</label><br>
-                    <textarea name="example" style="width:100%; padding:8px; margin-top:5px; box-sizing:border-box; height:80px;"></textarea>
-                </div>
-                <button type="submit" style="background:#0d9488; color:white; padding:10px 20px; border:none; border-radius:4px; font-weight:bold; cursor:pointer;">Сохранить</button>
-            </form>
-        </body>
-        </html>
-    `);
+    const html = renderLayout({
+        title: 'Добавить слово',
+        activeNav: 'new',
+        content: `
+            <div class="page-header">
+                <h1>Добавить новое слово</h1>
+                <a href="/words" class="btn btn-secondary">&larr; К ленте слов</a>
+            </div>
+            <section class="panel">
+                <form action="/words" method="POST">
+                    <div class="form-group">
+                        <label for="word">Иностранное слово *</label>
+                        <input id="word" type="text" name="word" placeholder="Например: Resilience">
+                    </div>
+                    <div class="form-group">
+                        <label for="translation">Перевод *</label>
+                        <input id="translation" type="text" name="translation" placeholder="Например: Устойчивость">
+                    </div>
+                    <div class="form-group">
+                        <label for="example">Пример использования</label>
+                        <textarea id="example" name="example" placeholder="Короткий пример предложения (необязательно)"></textarea>
+                    </div>
+                    <div class="actions" style="justify-content: flex-start;">
+                        <button type="submit" class="btn btn-primary">Сохранить слово</button>
+                        <a href="/words" class="btn btn-secondary">Отмена</a>
+                    </div>
+                </form>
+            </section>
+        `
+    });
+    res.send(html);
 });
 
 // Обработка отправки формы (создание записи в PostgreSQL)
@@ -191,25 +240,30 @@ app.get('/words/:id', async (req, res) => {
             return res.redirect('/action-error?reason=not_found');
         }
 
-        res.send(`
-            <!DOCTYPE html>
-            <html lang="ru">
-            <head>
-                <meta charset="UTF-8"><title>WordMaster - Карточка слова</title>
-                <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 600px; margin: 0 auto; }</style>
-            </head>
-            <body>
-                <nav style="margin-bottom: 20px;"><a href="/words">&larr; К ленте слов</a> | <a href="/">На главную</a></nav>
-                <div style="background:white; padding:30px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                    <span style="background:#ccfbf1; color:#0f766e; padding:4px 8px; border-radius:4px; font-size:12px;">Слово №${word.id}</span>
-                    <h1 style="margin-top:10px;">${word.word}</h1>
-                    <h2>Перевод: ${word.translation}</h2>
-                    <p><strong>Пример:</strong> ${word.example || 'Нет примера'}</p>
-                    <small>Добавлено: ${word.created_at}</small>
+        const html = renderLayout({
+            title: `Слово: ${word.word}`,
+            activeNav: 'words',
+            content: `
+                <div class="page-header">
+                    <h1>Карточка слова №${word.id}</h1>
+                    <a href="/words" class="btn btn-secondary">&larr; К ленте слов</a>
                 </div>
-            </body>
-            </html>
-        `);
+                <section class="panel">
+                    <span class="version-badge">Запись #${word.id}</span>
+                    <h2 style="margin: 12px 0 6px; font-size: 28px;">${escapeHtml(word.word)}</h2>
+                    <p style="margin: 0 0 16px; font-size: 20px; font-weight: 600; color: var(--primary-hover);">
+                        ${escapeHtml(word.translation)}
+                    </p>
+                    <p style="margin: 0 0 16px; color: var(--muted);">
+                        <strong>Пример:</strong> ${escapeHtml(word.example || 'Пример не указан')}
+                    </p>
+                    <p style="margin: 0; font-size: 13px; color: var(--muted);">
+                        Добавлено: ${escapeHtml(word.created_at)}
+                    </p>
+                </section>
+            `
+        });
+        res.send(html);
     } catch (err) {
         console.error('Error fetching word detail:', err);
         res.redirect('/action-error?reason=db_error');
@@ -218,37 +272,33 @@ app.get('/words/:id', async (req, res) => {
 
 // 5. Страница отказа / ошибочный сценарий (/action-error)
 app.get('/action-error', (req, res) => {
-    let reason = 'Обязательные поля (слово и перевод) не могут быть пустыми.';
+    let reason = 'Обязательные поля (слово и перевод) не заполнены.';
     if (req.query.reason === 'not_found') {
-        reason = 'Запрашиваемое слово не найдено в базе данных.';
+        reason = 'Запрашиваемая запись не найдена в базе данных.';
     } else if (req.query.reason === 'db_error') {
-        reason = 'Ошибка при обращении к базе данных.';
+        reason = 'Ошибка при обращении к базе данных PostgreSQL.';
     }
 
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="ru">
-        <head>
-            <meta charset="UTF-8"><title>WordMaster - Ошибка</title>
-            <style>body { font-family: Arial, sans-serif; background: #f8fafc; padding: 30px; max-width: 600px; margin: 0 auto; }</style>
-        </head>
-        <body>
-            <nav style="margin-bottom: 20px;"><a href="/">&larr; На главную</a></nav>
-            <div style="background:white; border-left: 6px solid #ef4444; padding:30px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
-                <h2 style="color:#dc2626; margin-top:0;">Ошибка 400: Действие отклонено</h2>
-                <p>Система не приняла данные. Посмотрите причину и попробуйте ещё раз.</p>
-                <hr style="border:0; border-top:1px solid #e2e8f0; margin: 20px 0;">
-                <p><strong>Кто:</strong> Пользователь системы</p>
-                <p><strong>Попытка:</strong> Сохранение или поиск записи</p>
-                <p><strong>Причина отказа:</strong> ${reason}</p>
-                <div style="margin-top:25px;">
-                    <a href="/words/new" style="background:#0d9488; color:white; padding:10px 20px; text-decoration:none; border-radius:4px; font-weight:bold; margin-right:10px;">Вернуться к форме</a>
-                    <a href="/words" style="background:#475569; color:white; padding:10px 20px; text-decoration:none; border-radius:4px; font-weight:bold;">К ленте слов</a>
+    const html = renderLayout({
+        title: 'Отказ в выполнении',
+        activeNav: 'error',
+        content: `
+            <section class="panel error-panel">
+                <span class="error-tag">ОШИБКА 400</span>
+                <h1 style="margin: 0 0 8px;">Действие отклонено</h1>
+                <p style="margin: 0; color: var(--muted);">Система не выполнила запрос. Проверьте причину и повторите действие.</p>
+                <div class="error-reason">Причина отказа: ${escapeHtml(reason)}</div>
+                <p style="margin: 0 0 6px;"><strong>Пользователь:</strong> Пользователь системы</p>
+                <p style="margin: 0;"><strong>Операция:</strong> Работа со словарём</p>
+                <div class="actions" style="justify-content: flex-start;">
+                    <a href="/words/new" class="btn btn-primary">Вернуться к форме</a>
+                    <a href="/words" class="btn btn-secondary">К ленте слов</a>
+                    <a href="/" class="btn btn-secondary">На главную</a>
                 </div>
-            </div>
-        </body>
-        </html>
-    `);
+            </section>
+        `
+    });
+    res.send(html);
 });
 
 initDatabase()

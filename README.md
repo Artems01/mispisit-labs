@@ -1,16 +1,15 @@
 # WordMaster — помощник по изучению иностранных слов
 
-Оформление интерфейса рабочей версии `0.0.4` (единые стили, навигация между экранами, сохранение данных в PostgreSQL).
+Рабочая версия `0.0.5` с внутренними уведомлениями о добавлении новых слов, сохранением событий в PostgreSQL и единым оформлением интерфейса.
 
 ## Запуск
 
 Репозиторий: https://github.com/Artems01/mispisit-labs
-Ветка: lab4
-Pull Request: https://github.com/Artems01/mispisit-labs/pull/4
-Образ: artems01/wordmaster:0.0.4
+Ветка: lab5
+Pull Request: https://github.com/Artems01/mispisit-labs/pull/5
+Образ: artems01/wordmaster:0.0.5
 
 ```bash
-git clone -b lab4 https://github.com/Artems01/mispisit-labs
+git clone -b lab5 [https://github.com/Artems01/mispisit-labs](https://github.com/Artems01/mispisit-labs)
 cd mispisit-labs
 docker compose up -d
-```

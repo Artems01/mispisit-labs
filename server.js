@@ -4,7 +4,7 @@ const { Pool } = require('pg');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-const APP_VERSION = '0.0.4';
+const APP_VERSION = '0.0.5';
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgres://app:app@db:5432/app'
@@ -27,8 +27,16 @@ function formatCurrentDate() {
     return `${now.toLocaleDateString('ru-RU')} - ${now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-function renderLayout({ title, activeNav, content }) {
+async function getUnreadNotificationsCount() {
+    const res = await pool.query(
+        'SELECT COUNT(*)::int AS cnt FROM word_notifications WHERE read_at IS NULL'
+    );
+    return res.rows[0]?.cnt ?? 0;
+}
+
+function renderLayout({ title, activeNav, unreadCount = 0, content }) {
     const navClass = (key) => (activeNav === key ? ' class="active"' : '');
+    const badgeText = unreadCount > 0 ? ` (${unreadCount})` : '';
 
     return `<!DOCTYPE html>
 <html lang="ru">
@@ -49,6 +57,7 @@ function renderLayout({ title, activeNav, content }) {
                 <a href="/"${navClass('home')}>Главная</a>
                 <a href="/words"${navClass('words')}>Лента слов</a>
                 <a href="/words/new"${navClass('new')}>Добавить слово</a>
+                <a href="/notifications"${navClass('notifications')}>Уведомления${escapeHtml(badgeText)}</a>
                 <a href="/action-error"${navClass('error')}>Пример отказа</a>
             </nav>
         </div>
@@ -80,6 +89,15 @@ async function initDatabase(retries = 15, delayMs = 2000) {
                     created_at VARCHAR(64) NOT NULL
                 );
             `);
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS word_notifications (
+                    id SERIAL PRIMARY KEY,
+                    word_id INTEGER NOT NULL UNIQUE REFERENCES words(id) ON DELETE CASCADE,
+                    event_type VARCHAR(64) NOT NULL DEFAULT 'word_added',
+                    created_at VARCHAR(64) NOT NULL,
+                    read_at VARCHAR(64) NULL
+                );
+            `);
             console.log('Database connected and schema is ready.');
             return;
         } catch (err) {
@@ -93,18 +111,21 @@ async function initDatabase(retries = 15, delayMs = 2000) {
 }
 
 // 1. Главная страница (/)
-app.get('/', (req, res) => {
+app.get('/', async (req, res) => {
+    const unreadCount = await getUnreadNotificationsCount().catch(() => 0);
     const html = renderLayout({
         title: 'Главная',
         activeNav: 'home',
+        unreadCount,
         content: `
             <section class="panel hero">
                 <span class="version-badge">Версия ${APP_VERSION}</span>
                 <h1>WordMaster</h1>
-                <p>Личный словарь для изучения иностранных слов: сохраняйте новые слова, просматривайте список и карточки в базе данных.</p>
+                <p>Личный словарь для изучения иностранных слов: сохраняйте новые слова, отслеживайте уведомления о добавлении и просматривайте карточки в базе данных.</p>
                 <div class="actions">
                     <a href="/words" class="btn btn-primary">Лента слов</a>
                     <a href="/words/new" class="btn btn-secondary">Добавить слово</a>
+                    <a href="/notifications" class="btn btn-secondary">Уведомления</a>
                     <a href="/action-error" class="btn btn-secondary">Страница отказа</a>
                 </div>
             </section>
@@ -116,6 +137,7 @@ app.get('/', (req, res) => {
 // 2. Просмотр списка слов (/words)
 app.get('/words', async (req, res) => {
     try {
+        const unreadCount = await getUnreadNotificationsCount();
         const result = await pool.query(
             'SELECT id, word, translation, example, created_at FROM words ORDER BY id ASC'
         );
@@ -143,6 +165,7 @@ app.get('/words', async (req, res) => {
         const html = renderLayout({
             title: 'Лента слов',
             activeNav: 'words',
+            unreadCount,
             content: `
                 <div class="page-header">
                     <h1>Лента слов (${words.length})</h1>
@@ -159,10 +182,12 @@ app.get('/words', async (req, res) => {
 });
 
 // 3. Форма добавления слова (/words/new)
-app.get('/words/new', (req, res) => {
+app.get('/words/new', async (req, res) => {
+    const unreadCount = await getUnreadNotificationsCount().catch(() => 0);
     const html = renderLayout({
         title: 'Добавить слово',
         activeNav: 'new',
+        unreadCount,
         content: `
             <div class="page-header">
                 <h1>Добавить новое слово</h1>
@@ -193,7 +218,7 @@ app.get('/words/new', (req, res) => {
     res.send(html);
 });
 
-// Обработка отправки формы (создание записи в PostgreSQL)
+// Обработка отправки формы (создание записи и уведомления в PostgreSQL)
 app.post('/words', async (req, res) => {
     const { word, translation, example } = req.body;
 
@@ -201,24 +226,36 @@ app.post('/words', async (req, res) => {
         return res.redirect('/action-error?reason=empty_fields');
     }
 
+    const client = await pool.connect();
     try {
         const cleanWord = word.trim();
         const cleanTranslation = translation.trim();
         const cleanExample = example ? example.trim() : '';
         const createdAt = formatCurrentDate();
 
-        const insertResult = await pool.query(
+        await client.query('BEGIN');
+        const insertResult = await client.query(
             `INSERT INTO words (word, translation, example, created_at)
              VALUES ($1, $2, $3, $4)
              RETURNING id`,
             [cleanWord, cleanTranslation, cleanExample, createdAt]
         );
-
         const newId = insertResult.rows[0].id;
+
+        await client.query(
+            `INSERT INTO word_notifications (word_id, event_type, created_at, read_at)
+             VALUES ($1, 'word_added', $2, NULL)`,
+            [newId, createdAt]
+        );
+        await client.query('COMMIT');
+
         res.redirect(`/words/${newId}`);
     } catch (err) {
-        console.error('Error inserting word:', err);
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Error inserting word and notification:', err);
         res.redirect('/action-error?reason=db_error');
+    } finally {
+        client.release();
     }
 });
 
@@ -230,6 +267,7 @@ app.get('/words/:id', async (req, res) => {
     }
 
     try {
+        const unreadCount = await getUnreadNotificationsCount();
         const result = await pool.query(
             'SELECT id, word, translation, example, created_at FROM words WHERE id = $1',
             [wordId]
@@ -243,6 +281,7 @@ app.get('/words/:id', async (req, res) => {
         const html = renderLayout({
             title: `Слово: ${word.word}`,
             activeNav: 'words',
+            unreadCount,
             content: `
                 <div class="page-header">
                     <h1>Карточка слова №${word.id}</h1>
@@ -270,8 +309,100 @@ app.get('/words/:id', async (req, res) => {
     }
 });
 
-// 5. Страница отказа / ошибочный сценарий (/action-error)
-app.get('/action-error', (req, res) => {
+// 5. Экран уведомлений (/notifications)
+app.get('/notifications', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                n.id,
+                n.word_id,
+                n.event_type,
+                n.created_at,
+                n.read_at,
+                w.word,
+                w.translation
+            FROM word_notifications n
+            JOIN words w ON w.id = n.word_id
+            ORDER BY n.id DESC
+        `);
+        const items = result.rows;
+        const unreadCount = items.filter((item) => !item.read_at).length;
+
+        const listMarkup = items.length > 0
+            ? items.map((item) => {
+                const isUnread = !item.read_at;
+                const statusLabel = isUnread ? 'Новое' : `Прочитано (${item.read_at})`;
+                return `
+                    <article class="word-card">
+                        <div class="word-meta" style="margin-bottom: 8px;">
+                            <span class="version-badge">${escapeHtml(statusLabel)}</span>
+                            <span>${escapeHtml(item.created_at)}</span>
+                        </div>
+                        <h2>Слово добавлено: ${escapeHtml(item.word)} — ${escapeHtml(item.translation)}</h2>
+                        <p class="word-example">Связанная запись: слово #${item.word_id} (событие: ${escapeHtml(item.event_type)})</p>
+                        <div class="word-meta">
+                            <a href="/words/${item.word_id}" class="btn btn-secondary">Открыть карточку &rarr;</a>
+                            ${isUnread ? `
+                                <form action="/notifications/${item.id}/read" method="POST" style="display: inline;">
+                                    <button type="submit" class="btn btn-primary">Отметить прочитанным</button>
+                                </form>
+                            ` : ''}
+                        </div>
+                    </article>
+                `;
+            }).join('')
+            : `
+                <section class="empty-state">
+                    <h2>Уведомлений пока нет</h2>
+                    <p>После успешного добавления нового слова здесь появится уведомление со ссылкой на запись.</p>
+                    <a href="/words/new" class="btn btn-primary">+ Добавить слово</a>
+                </section>
+            `;
+
+        const html = renderLayout({
+            title: 'Уведомления',
+            activeNav: 'notifications',
+            unreadCount,
+            content: `
+                <div class="page-header">
+                    <h1>Уведомления (непрочитанных: ${unreadCount})</h1>
+                    <a href="/words/new" class="btn btn-primary">+ Добавить слово</a>
+                </div>
+                ${listMarkup}
+            `
+        });
+        res.send(html);
+    } catch (err) {
+        console.error('Error loading notifications:', err);
+        res.redirect('/action-error?reason=db_error');
+    }
+});
+
+// Отметка уведомления как прочитанного (POST /notifications/:id/read)
+app.post('/notifications/:id/read', async (req, res) => {
+    const notifId = Number(req.params.id);
+    if (!Number.isInteger(notifId) || notifId <= 0) {
+        return res.redirect('/action-error?reason=not_found');
+    }
+
+    try {
+        const readAt = formatCurrentDate();
+        await pool.query(
+            `UPDATE word_notifications
+             SET read_at = $1
+             WHERE id = $2 AND read_at IS NULL`,
+            [readAt, notifId]
+        );
+        res.redirect('/notifications');
+    } catch (err) {
+        console.error('Error marking notification as read:', err);
+        res.redirect('/action-error?reason=db_error');
+    }
+});
+
+// 6. Страница отказа / ошибочный сценарий (/action-error)
+app.get('/action-error', async (req, res) => {
+    const unreadCount = await getUnreadNotificationsCount().catch(() => 0);
     let reason = 'Обязательные поля (слово и перевод) не заполнены.';
     if (req.query.reason === 'not_found') {
         reason = 'Запрашиваемая запись не найдена в базе данных.';
@@ -282,6 +413,7 @@ app.get('/action-error', (req, res) => {
     const html = renderLayout({
         title: 'Отказ в выполнении',
         activeNav: 'error',
+        unreadCount,
         content: `
             <section class="panel error-panel">
                 <span class="error-tag">ОШИБКА 400</span>

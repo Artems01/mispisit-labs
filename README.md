@@ -10,6 +10,7 @@ Pull Request: https://github.com/Artems01/mispisit-labs/pull/5
 Образ: artems01/wordmaster:0.0.5
 
 ```bash
-git clone -b lab5 [https://github.com/Artems01/mispisit-labs](https://github.com/Artems01/mispisit-labs)
+git clone -b lab5 https://github.com/Artems01/mispisit-labs
 cd mispisit-labs
 docker compose up -d
+```
